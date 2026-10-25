@@ -59,6 +59,7 @@ var rules = []rule{
 		layer: "internal/services",
 		deny: []string{
 			modulePath + "/internal/handlers",
+			modulePath + "/internal/mcpserver",
 			modulePath + "/internal/apps",
 			modulePath + "/middleware",
 			"github.com/gofiber/fiber",
@@ -76,23 +77,20 @@ var rules = []rule{
 		why: "generated repository code sits at the bottom and must not reach upwards",
 	},
 	{
-		layer: "internal/apiclient",
+		layer: "internal/mcpserver",
 		deny: []string{
-			modulePath + "/internal/services",
 			modulePath + "/internal/repository",
 			modulePath + "/internal/database",
 			modulePath + "/internal/cache",
-			modulePath + "/internal/domain",
 			modulePath + "/internal/handlers",
 			modulePath + "/internal/apps",
 			modulePath + "/middleware",
-			modulePath + "/config",
 			"github.com/gofiber/fiber",
 			"github.com/jackc/pgx",
 			"github.com/redis/go-redis",
 		},
-		why: "the API client (and the MCP tools built on it) reaches the server only through HTTP, " +
-			"so auth and scope checks stay in the API's middleware",
+		why: "the MCP tools are a transport like the handlers: they call services and see domain types, " +
+			"never database rows, and must not lean on Fiber since the MCP SDK runs on net/http",
 	},
 	{
 		layer: "middleware",

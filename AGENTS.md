@@ -60,7 +60,7 @@ infrastructure at all; everything else may depend on it.
 | Mapping | `internal/services/mapping.go` | sqlc row → domain type; the only place that knows both shapes |
 | Services | `internal/services/` | Orchestration: reads/writes + cache + transactions; aggregated in `service.go` |
 | Handlers | `internal/handlers/` | Fiber context parsing; aggregated in `handler.go` |
-| API client | `internal/apiclient/` | HTTP client of the API and the MCP tools built on it, served at `/mcp` |
+| MCP tools | `internal/mcpserver/` | MCP tools over the services, served at `/mcp`; a transport like handlers |
 | Middleware | `middleware/` | JWT auth, error formatting, context helpers |
 | Utilities | `pkg/` | `logx/` (zerolog wrapper), `errorx/` (typed errors), `utils/` (JWT gen/parse) |
 
@@ -81,7 +81,7 @@ you add a boundary.
    layer, and keeps secrets out of upper layers — `dbgen.ApiKey` carries `KeyHash`
    and `dbgen.User` carries `PasswordHash`; neither domain type does. Handlers must
    not import `dbgen` at all, and swagger annotations reference `domain.*`.
-3. **Services must not import the transport layer** (handlers, middleware, fiber).
+3. **Services must not import the transport layer** (handlers, mcpserver, middleware, fiber).
 4. **Every bill write goes through `BillService.invalidateStatsFor`.** A write that
    skips it leaves `/api/stats` serving pre-write totals. Routing all four paths
    (create, batch, update, delete) through one method keeps the rule in one place;
@@ -159,7 +159,7 @@ GET  /api/stats/category          scope stats:read
 GET  /api/stats/home              scope stats:read (alias of monthly)
 
 POST /mcp                         MCP (Streamable HTTP); any valid JWT or API key,
-                                  each tool call needs its route's scope
+                                  each tool call needs the scope it declares
 ```
 
 Scoped routes accept either a JWT `Authorization: Bearer` header or an
@@ -175,28 +175,33 @@ the server, and agents reach it through MCP.
 claude mcp add --transport http sumi https://sumi.example.com/mcp --header "X-API-Key: sk_..."
 ```
 
-- **The MCP tools are an API client.** `internal/apiclient` holds every client
-  operation (`AddBill`, `AddBills`, `ListBills`, `GetBill`, `UpdateBill`,
-  `DeleteBill`, `ListCategories`, `AddCategory`, `GetStats`) and the tools on top
-  (`internal/apiclient/mcp.go`). `/mcp` points that client at the Fiber app
-  **in-process** (`inProcessTransport`, no socket) with the caller's credential, so a
-  tool call passes the same route, auth middleware and scope check as a direct API
-  call — there is no second authorization path to keep in sync. `arch_test.go`
-  keeps `internal/apiclient` off services, middleware and fiber to hold that line.
-- `/mcp` needs a valid credential to connect but no particular scope; each tool call
-  then needs the scope of the route it reaches (a read-only key gets a 403 tool
-  error from `add_bill`). It runs stateless with JSON responses, which is what lets
-  it sit behind Fiber's fasthttp adaptor. Localhost (DNS-rebinding) protection is
-  off on purpose: the credential already defeats rebinding, and the check would
-  reject every request from a reverse proxy on the same host.
-- Tool inputs use `expense`/`income`, mapped onto the API's `1`/`2`.
-- `update_bill` GETs the row and resends every field, because the API's PUT is a
-  full replace — sending one field alone would blank the other columns.
-- `list_bills` takes a category *name*; the client resolves it to an id because
-  the API filters by `category_id` only.
-- Tests: `internal/apiclient/mcp_test.go` drives the tools through the protocol
-  against an `httptest` fake API (no docker); `internal/apps/mcp_test.go` runs a real
-  MCP client against `/mcp` on a listening server with PostgreSQL and Redis.
+- **The MCP tools are a transport, like the handlers.** `internal/mcpserver` calls
+  the services directly and sees only domain types; `arch_test.go` keeps it off
+  repository, middleware and fiber. `internal/apps/mcp.go` only mounts it.
+- **Each tool declares its scope where it is registered**
+  (`addTool(server, t, "transactions:delete", ...)` in `internal/mcpserver/tools.go`),
+  the same scope as its REST route. Keep the two in step when a route's scope changes.
+- `/mcp` needs a valid credential to connect but no particular scope. The SDK does
+  not hand tools the HTTP context, so each call re-reads the credential from the
+  request headers and checks it with `AuthService` / `APIKeyService.Validate`, with
+  the precedence `middleware.JWTOrAPIKey` uses: a bearer token wins and carries every
+  scope, an API key needs the tool's scope (a read-only key gets a 403 tool error
+  from `add_bill`).
+- It runs stateless with JSON responses, which is what lets it sit behind Fiber's
+  fasthttp adaptor. Localhost (DNS-rebinding) protection is off on purpose: the
+  credential already defeats rebinding, and the check would reject every request
+  from a reverse proxy on the same host.
+- Tool errors carry the status and message the REST API would send (`400: ...`);
+  a non-`errorx` error is logged and reported as `500: Internal Server Error`.
+- Tools speak `expense`/`income`, `note` and `date` (YYYY-MM-DD) in both inputs and
+  outputs, so a listed bill can be fed back into `update_bill` unchanged.
+- `update_bill` reads the row and fills every field it was not given, because
+  `BillService.UpdateBill` replaces the whole row.
+- `list_bills` takes a category *name* and resolves it to an id, because
+  `ListBills` filters by id only.
+- Tests: `internal/mcpserver/server_test.go` checks the tool list, fail-closed auth
+  and input parsing without docker; `internal/apps/mcp_test.go` runs a real MCP client
+  against `/mcp` on a listening server with PostgreSQL and Redis.
 
 ### AI/agent-facing conventions
 

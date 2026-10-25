@@ -93,15 +93,27 @@ func TestMCPEndpointRoundTrip(t *testing.T) {
 	if isErr {
 		t.Fatalf("add_bill: %s", text)
 	}
-	var created billBody
+	var created struct {
+		ID   int64  `json:"id"`
+		Type string `json:"type"`
+		Date string `json:"date"`
+	}
 	if err := json.Unmarshal([]byte(text), &created); err != nil {
 		t.Fatalf("add_bill returned %q: %v", text, err)
+	}
+	if created.Type != "expense" || created.Date != "2026-08-07" {
+		t.Errorf("add_bill must answer in the tools' own words, got %q", text)
 	}
 
 	var listedBills []billBody
 	env.mustDo("GET", "/api/transactions/?keyword=mcp-roundtrip", "key", nil, http.StatusOK, &listedBills)
 	if len(listedBills) != 1 || listedBills[0].ID != created.ID || listedBills[0].Amount != "18.8" {
 		t.Fatalf("bill recorded over MCP not found through the API: %+v", listedBills)
+	}
+
+	text, isErr = callMCPTool(t, session, "list_bills", map[string]any{"category": "吃", "keyword": "mcp-roundtrip"})
+	if isErr || !strings.Contains(text, `"id":`+strconv.FormatInt(created.ID, 10)) {
+		t.Fatalf("list_bills by category name must find the bill, got isError=%v %q", isErr, text)
 	}
 
 	text, isErr = callMCPTool(t, session, "update_bill", map[string]any{"id": created.ID, "amount": "20"})
@@ -116,7 +128,7 @@ func TestMCPEndpointRoundTrip(t *testing.T) {
 }
 
 // TestMCPEndpointEnforcesAuthAndScopes: connecting needs a credential, and each
-// tool call is held to the scope its route requires.
+// tool call is held to the scope it declares.
 func TestMCPEndpointEnforcesAuthAndScopes(t *testing.T) {
 	env := newTestEnv(t)
 	baseURL := env.listen()
@@ -142,8 +154,14 @@ func TestMCPEndpointEnforcesAuthAndScopes(t *testing.T) {
 	if text, isErr := callMCPTool(t, session, "list_bills", map[string]any{}); isErr {
 		t.Fatalf("read scope should allow list_bills: %s", text)
 	}
-	text, isErr := callMCPTool(t, session, "add_bill", map[string]any{"amount": "1", "category": "吃"})
-	if !isErr || !strings.Contains(text, "403") {
-		t.Fatalf("add_bill without transactions:write must be a 403 tool error, got isError=%v %q", isErr, text)
+	for name, args := range map[string]map[string]any{
+		"add_bill":    {"amount": "1", "category": "吃"},
+		"delete_bill": {"id": 1},
+		"get_stats":   {"report": "monthly"},
+	} {
+		text, isErr := callMCPTool(t, session, name, args)
+		if !isErr || !strings.Contains(text, "403") {
+			t.Errorf("%s with a transactions:read key must be a 403 tool error, got isError=%v %q", name, isErr, text)
+		}
 	}
 }
