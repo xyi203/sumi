@@ -32,25 +32,3 @@ func RunMigrations(ctx context.Context, cfg *config.Config) error {
 
 	return nil
 }
-
-func MigrationStatus(ctx context.Context, cfg *config.Config) error {
-	db, err := sql.Open("pgx", cfg.DBDSN)
-	if err != nil {
-		return fmt.Errorf("open database for migration status: %w", err)
-	}
-	defer db.Close()
-
-	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("ping database for migration status: %w", err)
-	}
-
-	if err := goose.SetDialect("postgres"); err != nil {
-		return fmt.Errorf("set goose dialect: %w", err)
-	}
-
-	if err := goose.StatusContext(ctx, db, cfg.MigrationsDir); err != nil {
-		return fmt.Errorf("goose status: %w", err)
-	}
-
-	return nil
-}

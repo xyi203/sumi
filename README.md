@@ -1,13 +1,10 @@
 # 项目结构
 
 ``` 
-├── main.go                     # 项目总入口 (通常只是一行调用 cmd/api)
+├── main.go                     # 项目总入口，直接启动 API 服务
 ├── go.mod                      # 依赖管理
 ├── Makefile                    # 常用指令 (make run, make build, make test)
 ├── .env                        # 环境变量
-├── cmd/                        # 程序的入口点
-│   └── api/
-│       └── main.go             # API 服务的启动逻辑 (组装依赖、配置加载)
 ├── config/                     # 配置管理
 │   ├── config.go               # 配置结构体
 ├── internal/                   # 核心私有业务逻辑 (Internal 机制保证安全)

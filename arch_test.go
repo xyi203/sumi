@@ -50,32 +50,10 @@ var rules = []rule{
 			"github.com/jackc/pgx",
 			"github.com/redis/go-redis",
 			"github.com/gofiber/fiber",
-			"github.com/spf13/cobra",
 			"golang.org/x/crypto",
 		},
 		why: "the domain layer must stay infrastructure-free so its rules can be unit-tested " +
 			"without a database; pkg/errorx and shopspring/decimal are allowed as pure value types",
-	},
-	{
-		layer: "internal/csvimport",
-		deny: []string{
-			modulePath + "/internal/repository",
-			modulePath + "/internal/database",
-			modulePath + "/internal/cache",
-			modulePath + "/internal/services",
-			modulePath + "/internal/handlers",
-			modulePath + "/internal/apps",
-			modulePath + "/config",
-			"github.com/jackc/pgx",
-			"github.com/redis/go-redis",
-			"github.com/gofiber/fiber",
-			"github.com/spf13/cobra",
-			"os",
-			"net/http",
-		},
-		why: "CSV parsing is pure conversion: it takes bytes and returns records, so it " +
-			"must not read files or reach the network itself — that keeps every format " +
-			"quirk unit-testable",
 	},
 	{
 		layer: "internal/services",
@@ -98,13 +76,6 @@ var rules = []rule{
 		why: "generated repository code sits at the bottom and must not reach upwards",
 	},
 	{
-		layer: "cmd",
-		deny:  []string{modulePath + "/internal/services", modulePath + "/internal/repository"},
-		allow: []string{modulePath + "/internal/apps"},
-		why: "the CLI is an HTTP client of the API; it must not link the service layer directly, " +
-			"apart from cmd/api.go starting the server via internal/apps",
-	},
-	{
 		layer: "internal/apiclient",
 		deny: []string{
 			modulePath + "/internal/services",
@@ -121,7 +92,7 @@ var rules = []rule{
 			"github.com/redis/go-redis",
 		},
 		why: "the API client (and the MCP tools built on it) reaches the server only through HTTP, " +
-			"so auth and scope checks stay in the API's middleware; it is linked into the CLI too",
+			"so auth and scope checks stay in the API's middleware",
 	},
 	{
 		layer: "middleware",
@@ -157,9 +128,7 @@ func TestLayerDependencies(t *testing.T) {
 // must not import any other package of this module except pkg/, so the layer
 // cannot start pulling in application concerns.
 func TestDomainHasNoModuleDependencies(t *testing.T) {
-	for _, dir := range []string{"internal/domain", "internal/csvimport"} {
-		assertNoModuleDependencies(t, dir)
-	}
+	assertNoModuleDependencies(t, "internal/domain")
 }
 
 func assertNoModuleDependencies(t *testing.T, dir string) {

@@ -37,7 +37,6 @@ jobs:
           --health-retries 10
 
     env:
-      DB_DSN: postgres://postgres:sumi@localhost:5432/sumi?sslmode=disable
       TEST_DB_DSN: postgres://postgres:sumi@localhost:5432/sumi?sslmode=disable
       TEST_REDIS_URL: redis://localhost:6379/0
 
@@ -52,16 +51,13 @@ jobs:
 
       - name: Verify formatting
         run: |
-          unformatted=$(gofmt -l cmd config internal middleware pkg)
+          unformatted=$(gofmt -l config internal middleware pkg)
           if [ -n "$unformatted" ]; then
             echo "These files are not gofmt-clean:"; echo "$unformatted"; exit 1
           fi
 
       - name: Vet
         run: go vet ./...
-
-      - name: Migrate
-        run: go run main.go migrate
 
       - name: Test
         run: go test ./... -count=1

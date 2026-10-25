@@ -36,9 +36,8 @@ const (
 
 const (
 	// MaxBatchSize bounds one batch insert so a malformed request cannot open an
-	// unbounded transaction. It is sized for a CSV import (one file, one
-	// transaction); an interactive client recording a handful of bills stays far
-	// below it.
+	// unbounded transaction. It is sized for a bulk import in one transaction; an
+	// interactive client recording a handful of bills stays far below it.
 	MaxBatchSize = 1000
 	// MaxDescriptionLength matches the practical limit enforced on bill notes.
 	MaxDescriptionLength = 500

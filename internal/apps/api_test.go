@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +47,13 @@ type testEnv struct {
 	key   string
 }
 
+// migrateOnce brings the test database's schema up to date once per run, so the
+// suite needs nothing but a reachable PostgreSQL and Redis.
+var (
+	migrateOnce sync.Once
+	migrateErr  error
+)
+
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
 
@@ -62,7 +70,13 @@ func newTestEnv(t *testing.T) *testEnv {
 	cfg.DBDSN = dsn
 	cfg.RedisConfig.RedisURL = redisURL
 	cfg.AutoMigrate = false
+	cfg.MigrationsDir = "../../migrations"
 	cfg.LogFormat = "console"
+
+	migrateOnce.Do(func() { migrateErr = database.RunMigrations(t.Context(), cfg) })
+	if migrateErr != nil {
+		t.Fatalf("migrate: %v", migrateErr)
+	}
 
 	pool, err := database.NewPool(t.Context(), cfg)
 	if err != nil {
@@ -501,7 +515,8 @@ func TestScopesAreEnforced(t *testing.T) {
 }
 
 // TestUpdateReplacesWholeRow documents that PUT is a full replace: an omitted
-// description is cleared. The CLI compensates by re-sending every field.
+// description is cleared. The update_bill MCP tool compensates by re-sending
+// every field.
 func TestUpdateReplacesWholeRow(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -536,7 +551,7 @@ func userIDOf(t *testing.T, env *testEnv) uuid.UUID {
 	return parsed
 }
 
-// TestLargeBatchIsAtomicAndCheap covers what a CSV import actually does: several
+// TestLargeBatchIsAtomicAndCheap covers what a bulk import actually does: several
 // hundred rows in one transaction. It also pins the fix for the N+1 that a naive
 // implementation has — the per-user and per-category-tree reads must happen once
 // for the whole batch, not once per row.

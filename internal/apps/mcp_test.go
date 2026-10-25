@@ -83,11 +83,6 @@ func TestMCPEndpointRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tool := range listed.Tools {
-		if tool.Name == "import_csv" {
-			t.Error("import_csv must not be served remotely: it would read the server's disk")
-		}
-	}
 	if len(listed.Tools) != 9 {
 		t.Errorf("got %d tools, want 9", len(listed.Tools))
 	}

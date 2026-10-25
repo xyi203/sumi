@@ -2,7 +2,7 @@
 BINARY_NAME=bin/server
 MAIN_PATH=main.go
 
-.PHONY: run build generate swagger migrate migrate-status api help test test-integration test-integration-down
+.PHONY: run build generate swagger help test test-integration test-integration-down
 
 TEST_PG_PORT?=55432
 TEST_REDIS_PORT?=56379
@@ -19,24 +19,11 @@ swagger:
 	@echo "Generating Swagger docs..."
 	swag init -g swagger.go -o docs
 
-migrate:
-	@echo "Running database migrations..."
-	go run $(MAIN_PATH) migrate
-
-migrate-status:
-	@echo "Showing database migration status..."
-	go run $(MAIN_PATH) migrate status
-
-# 2. 运行主程序
+# 2. 启动 API 服务（AUTO_MIGRATE=true 时先执行迁移）
 run:
 	go run $(MAIN_PATH)
 
-# 3. 运行 API (通常与 run 类似，或者可以指定配置文件)
-api:
-	@echo "Starting API server..."
-	go run $(MAIN_PATH) api
-
-# 4. 编译二进制文件
+# 3. 编译二进制文件
 build:
 	@echo "Building binary..."
 	go build -o $(BINARY_NAME) $(MAIN_PATH)
@@ -45,8 +32,9 @@ test:
 	go test ./...
 
 # Integration tests need a real PostgreSQL and Redis: the logic they guard lives in
-# SQL and cache invalidation. Starts throwaway containers, migrates, runs, and
-# leaves them up for the next run (use test-integration-down to remove them).
+# SQL and cache invalidation. Starts throwaway containers and runs the suite, which
+# migrates the database itself; the containers stay up for the next run (use
+# test-integration-down to remove them).
 test-integration:
 	@docker start sumi-test-pg 2>/dev/null || docker run -d --name sumi-test-pg \
 		-e POSTGRES_PASSWORD=sumi -e POSTGRES_DB=sumi -p $(TEST_PG_PORT):5432 postgres:16-alpine
@@ -54,7 +42,6 @@ test-integration:
 		-p $(TEST_REDIS_PORT):6379 redis:7-alpine
 	@echo "Waiting for PostgreSQL..."
 	@until docker exec sumi-test-pg pg_isready -U postgres >/dev/null 2>&1; do sleep 1; done
-	@DB_DSN="$(TEST_DB_DSN)" go run $(MAIN_PATH) migrate
 	TEST_DB_DSN="$(TEST_DB_DSN)" TEST_REDIS_URL="$(TEST_REDIS_URL)" go test ./... -count=1
 
 test-integration-down:
@@ -65,8 +52,5 @@ help:
 	@echo "Usage:"
 	@echo "  make generate  - Run sqlc generate in /sqlc directory"
 	@echo "  make swagger   - Generate Swagger docs with swaggo/swag"
-	@echo "  make migrate   - Run goose up against DB_DSN"
-	@echo "  make migrate-status - Show goose migration status"
-	@echo "  make run       - Run the application"
-	@echo "  make api       - Alias for running the API server"
+	@echo "  make run       - Start the API server (AUTO_MIGRATE=true migrates first)"
 	@echo "  make build     - Build the server binary"

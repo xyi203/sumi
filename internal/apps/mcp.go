@@ -18,13 +18,11 @@ import (
 // inProcessBaseURL only has to parse: requests to it never leave the process.
 const inProcessBaseURL = "http://sumi.internal"
 
-// newMCPHandler serves the MCP tools over Streamable HTTP. The tools are the
-// same apiclient code `sumi mcp` runs, pointed at this app in-process and
-// carrying the caller's own credential, so every tool call passes through the
-// same routes, auth and scope checks as a direct API call: a key without
-// transactions:delete cannot delete through MCP either.
-//
-// import_csv is left out: its file path would name a file on this server.
+// newMCPHandler serves the MCP tools over Streamable HTTP. The tools are
+// apiclient code pointed at this app in-process and carrying the caller's own
+// credential, so every tool call passes through the same routes, auth and scope
+// checks as a direct API call: a key without transactions:delete cannot delete
+// through MCP either.
 func newMCPHandler(app *fiber.App) fiber.Handler {
 	inProcess := &http.Client{
 		Transport: inProcessTransport{handler: adaptor.FiberApp(app)},

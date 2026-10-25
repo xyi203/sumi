@@ -1,8 +1,8 @@
-// Package apiclient is the HTTP client of sumi's own API: the bill, category,
-// stats and CSV-import operations, and the MCP server built on them.
+// Package apiclient is the HTTP client of sumi's own API: the bill, category
+// and stats operations, and the MCP server built on them.
 //
-// Both the CLI and the server's /mcp endpoint use it. Going through the API
-// rather than the service layer keeps one implementation of every operation and
+// The server's /mcp endpoint uses it in-process. Going through the API rather
+// than the service layer keeps one implementation of every operation and
 // lets the API's middleware stay the single place that authenticates and checks
 // scopes; arch_test.go keeps this package off the server's internals.
 package apiclient

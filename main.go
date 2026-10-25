@@ -1,7 +1,10 @@
 package main
 
-import "sumi/cmd"
+import (
+	"sumi/config"
+	"sumi/internal/apps"
+)
 
 func main() {
-	cmd.Execute()
+	apps.StartAPIServer(config.NewConfig())
 }

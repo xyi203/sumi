@@ -9,8 +9,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// mcpInstructions is what a connected agent reads before its first call. It is
-// the part of skills/sumi/SKILL.md that tool descriptions cannot carry alone.
+// mcpInstructions is what a connected agent reads before its first call: the
+// conventions that tool descriptions cannot carry alone.
 const mcpInstructions = `sumi records and queries the user's personal bills.
 
 - Categories are two-level and a bill can only use a second-level name (e.g. 吃, 行),
@@ -19,21 +19,16 @@ const mcpInstructions = `sumi records and queries the user's personal bills.
   user's own timezone, which your clock may not match. Omit currency unless the
   user named one.
 - Several bills in one request go through add_bills, which is all or nothing.
-- Confirm with the user before delete_bill or a non-dry-run import_csv.
+- Confirm with the user before delete_bill.
 - A 403 means the API key lacks a scope; tell the user instead of retrying.
 - Reply to the user in plain language, not raw JSON.`
 
 // MCPOptions decides where a tool call's requests go and with which credential.
 type MCPOptions struct {
-	// Connect returns the client for one tool call. It runs per call, so a
-	// missing credential surfaces as a tool error the agent can relay, and a
-	// remote server can use the credential of the request being served.
+	// Connect returns the client for one tool call. It runs per call, so each
+	// call uses the credential of the request being served, and a missing one
+	// surfaces as a tool error the agent can relay.
 	Connect func(ctx context.Context, req *mcp.CallToolRequest) (*Client, error)
-
-	// LocalFiles adds import_csv, which reads a path on the machine running the
-	// MCP server. Only true where that is also the agent's machine (stdio): a
-	// remote server would be reading its own disk.
-	LocalFiles bool
 }
 
 type idInput struct {
@@ -81,22 +76,7 @@ type statsInput struct {
 	Type   string `json:"type,omitempty" jsonschema:"expense (default) or income; only for the category report"`
 }
 
-type importCSVInput struct {
-	File            string            `json:"file" jsonschema:"absolute path of the CSV file on the machine running sumi"`
-	Map             map[string]string `json:"map,omitempty" jsonschema:"field to column: keys date/amount/category/type/note/currency, values a header name or 1-based column number"`
-	CategoryMap     map[string]string `json:"category_map,omitempty" jsonschema:"source category to the user's second-level category name, e.g. {\"餐饮美食\": \"吃\"}"`
-	DefaultCategory string            `json:"default_category,omitempty" jsonschema:"category for rows that have none"`
-	DefaultType     string            `json:"default_type,omitempty" jsonschema:"expense (default) or income, used when no type column is mapped"`
-	SkipRows        int               `json:"skip_rows,omitempty" jsonschema:"lines to drop before the header row"`
-	Encoding        string            `json:"encoding,omitempty" jsonschema:"utf8 or gbk; omit to auto-detect"`
-	Delimiter       string            `json:"delimiter,omitempty" jsonschema:"field delimiter; omit for comma"`
-	SkipInvalid     bool              `json:"skip_invalid,omitempty" jsonschema:"skip unconvertible rows instead of aborting the file"`
-	KeepZeroAmount  bool              `json:"keep_zero_amount,omitempty" jsonschema:"keep rows whose amount is zero"`
-	DryRun          bool              `json:"dry_run,omitempty" jsonschema:"convert and preview without writing; do this first"`
-}
-
-// rawResult hands the API's JSON to the agent unchanged, the same document the
-// CLI would print.
+// rawResult hands the API's JSON to the agent unchanged.
 func rawResult(raw []byte, err error) (*mcp.CallToolResult, any, error) {
 	if err != nil {
 		return nil, nil, err
@@ -222,33 +202,6 @@ func NewMCPServer(opts MCPOptions) *mcp.Server {
 	}, opts, func(ctx context.Context, c *Client, in statsInput) (*mcp.CallToolResult, any, error) {
 		return rawResult(c.GetStats(ctx, strings.TrimSpace(in.Report), in.Month, in.Type))
 	})
-
-	if opts.LocalFiles {
-		// No addTool here: a dry run needs no credential, so the client is only
-		// resolved once the import actually writes.
-		mcp.AddTool(server, &mcp.Tool{
-			Name: "import_csv",
-			Description: "Import a CSV bill export (Alipay, WeChat, bank) as one atomic batch of at most 1000 rows. " +
-				"Read only the first ~20 lines yourself to pick map/category_map/skip_rows, check list_categories, " +
-				"run with dry_run first, and confirm the count and mapping with the user before the real import. " +
-				"Row numbers in errors refer to the original file.",
-			Annotations: writes("Import a CSV", false, false),
-		}, func(ctx context.Context, req *mcp.CallToolRequest, in importCSVInput) (*mcp.CallToolResult, any, error) {
-			return valueResult(ImportCSV(ctx, ImportOptions{
-				File:            in.File,
-				Mapping:         in.Map,
-				CategoryMap:     in.CategoryMap,
-				DefaultCategory: in.DefaultCategory,
-				DefaultType:     orExpense(in.DefaultType),
-				SkipRows:        in.SkipRows,
-				Encoding:        in.Encoding,
-				Delimiter:       in.Delimiter,
-				SkipInvalid:     in.SkipInvalid,
-				KeepZeroAmount:  in.KeepZeroAmount,
-				DryRun:          in.DryRun,
-			}, func() (*Client, error) { return opts.Connect(ctx, req) }))
-		})
-	}
 
 	return server
 }

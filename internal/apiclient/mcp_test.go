@@ -7,8 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -83,7 +81,6 @@ func connectMCP(t *testing.T, apiKey string) (*mcp.ClientSession, *fakeAPI) {
 			}
 			return &Client{BaseURL: httpServer.URL, APIKey: apiKey, HTTP: httpServer.Client()}, nil
 		},
-		LocalFiles: true,
 	})
 
 	ctx := context.Background()
@@ -132,14 +129,14 @@ func TestMCPListsEveryTool(t *testing.T) {
 
 	for _, name := range []string{
 		"add_bill", "add_bills", "list_bills", "get_bill", "update_bill", "delete_bill",
-		"list_categories", "add_category", "get_stats", "import_csv",
+		"list_categories", "add_category", "get_stats",
 	} {
 		if tools[name] == nil {
 			t.Errorf("tool %q is not listed", name)
 		}
 	}
-	if len(tools) != 10 {
-		t.Errorf("got %d tools, want 10", len(tools))
+	if len(tools) != 9 {
+		t.Errorf("got %d tools, want 9", len(tools))
 	}
 
 	// A client may skip confirmation for tools not marked destructive.
@@ -219,28 +216,11 @@ func TestMCPStatsDefaultsCategoryReportToExpense(t *testing.T) {
 	}
 }
 
-func TestMCPWithoutCredentialFailsPerCallAndDryRunStillWorks(t *testing.T) {
+func TestMCPWithoutCredentialFailsPerCall(t *testing.T) {
 	session, _ := connectMCP(t, "")
 
 	text, isErr := callTool(t, session, "list_bills", map[string]any{})
 	if !isErr || !strings.Contains(text, "no API key") {
 		t.Fatalf("want a missing-key tool error, got isError=%v %q", isErr, text)
-	}
-
-	csvPath := filepath.Join(t.TempDir(), "bill.csv")
-	csv := "date,amount,category,note\n2026-08-01,12.00,吃,早饭\n2026-08-02,0,吃,不计\n"
-	if err := os.WriteFile(csvPath, []byte(csv), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	text, isErr = callTool(t, session, "import_csv", map[string]any{"file": csvPath, "dry_run": true})
-	if isErr {
-		t.Fatalf("dry run needs no credential, got %q", text)
-	}
-	var preview map[string]any
-	if err := json.Unmarshal([]byte(text), &preview); err != nil {
-		t.Fatal(err)
-	}
-	if preview["would_import"] != float64(1) {
-		t.Errorf("would_import = %v, want 1 (the zero-amount row is dropped)", preview["would_import"])
 	}
 }

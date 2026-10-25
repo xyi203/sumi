@@ -133,14 +133,6 @@ func billPath(id int64) string {
 	return "/api/transactions/" + strconv.FormatInt(id, 10)
 }
 
-func ParseBillID(raw string) (int64, error) {
-	id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
-	if err != nil || id <= 0 {
-		return 0, fmt.Errorf("invalid transaction id %q", raw)
-	}
-	return id, nil
-}
-
 func (c *Client) GetBill(ctx context.Context, id int64) ([]byte, error) {
 	return c.Do(ctx, "GET", billPath(id), nil, nil)
 }
