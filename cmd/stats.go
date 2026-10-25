@@ -1,8 +1,7 @@
 package cmd
 
 import (
-	"net/url"
-	"strconv"
+	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -10,77 +9,42 @@ import (
 
 var statsCmd = groupCommand("stats", "Read spending summaries")
 
-func monthQuery(cmd *cobra.Command) url.Values {
-	query := url.Values{}
-	if month, _ := cmd.Flags().GetString("month"); strings.TrimSpace(month) != "" {
-		query.Set("month", strings.TrimSpace(month))
+func statsCommand(report, short string) *cobra.Command {
+	command := &cobra.Command{
+		Use:   report,
+		Short: short,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := newAPIClient()
+			if err != nil {
+				return err
+			}
+			month, _ := cmd.Flags().GetString("month")
+			rawType := ""
+			if cmd.Flags().Lookup("type") != nil {
+				rawType, _ = cmd.Flags().GetString("type")
+				if strings.TrimSpace(rawType) == "" {
+					return fmt.Errorf("invalid --type %q: use expense or income", rawType)
+				}
+			}
+			raw, err := client.GetStats(cmd.Context(), report, month, rawType)
+			if err != nil {
+				return err
+			}
+			return emitJSON(raw)
+		},
 	}
-	return query
-}
-
-var statsMonthlyCmd = &cobra.Command{
-	Use:   "monthly",
-	Short: "Income, expense and net total per currency for one month",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := newAPIClient()
-		if err != nil {
-			return err
-		}
-		raw, err := client.do("GET", "/api/stats/monthly", monthQuery(cmd), nil)
-		if err != nil {
-			return err
-		}
-		return emitJSON(raw)
-	},
-}
-
-var statsDailyCmd = &cobra.Command{
-	Use:   "daily",
-	Short: "Per-day income and expense for one month",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := newAPIClient()
-		if err != nil {
-			return err
-		}
-		raw, err := client.do("GET", "/api/stats/daily", monthQuery(cmd), nil)
-		if err != nil {
-			return err
-		}
-		return emitJSON(raw)
-	},
-}
-
-var statsCategoryCmd = &cobra.Command{
-	Use:   "category",
-	Short: "Per-category totals for one month",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		client, err := newAPIClient()
-		if err != nil {
-			return err
-		}
-
-		rawType, _ := cmd.Flags().GetString("type")
-		billType, err := parseBillType(rawType)
-		if err != nil {
-			return err
-		}
-
-		query := monthQuery(cmd)
-		query.Set("type", strconv.Itoa(int(billType)))
-		raw, err := client.do("GET", "/api/stats/category", query, nil)
-		if err != nil {
-			return err
-		}
-		return emitJSON(raw)
-	},
+	command.Flags().String("month", "", "Month as YYYY-MM (default: current month)")
+	return command
 }
 
 func init() {
-	statsMonthlyCmd.Flags().String("month", "", "Month as YYYY-MM (default: current month)")
-	statsDailyCmd.Flags().String("month", "", "Month as YYYY-MM (default: current month)")
-	statsCategoryCmd.Flags().String("month", "", "Month as YYYY-MM (default: current month)")
+	statsCategoryCmd := statsCommand("category", "Per-category totals for one month")
 	statsCategoryCmd.Flags().String("type", "expense", "expense or income")
 
-	statsCmd.AddCommand(statsMonthlyCmd, statsDailyCmd, statsCategoryCmd)
+	statsCmd.AddCommand(
+		statsCommand("monthly", "Income, expense and net total per currency for one month"),
+		statsCommand("daily", "Per-day income and expense for one month"),
+		statsCategoryCmd,
+	)
 	rootView.AddCommand(statsCmd)
 }

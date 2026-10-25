@@ -123,4 +123,8 @@ func RegisterRoutes(app *fiber.App, handler *handlers.Handler, cfg *config.Confi
 	// Backward-compatible alias for the original home stats endpoint.
 	homeStats := api.Group("/stats")
 	homeStats.Get("/home", middleware.JWTOrAPIKey(handler.S.Auth, handler.S.APIKey, "stats:read"), handler.GetMonthlyStats)
+
+	// MCP over Streamable HTTP. No scope is required to connect: each tool call
+	// is re-dispatched to the routes above, which check the scope it needs.
+	app.All("/mcp", middleware.JWTOrAPIKey(handler.S.Auth, handler.S.APIKey), newMCPHandler(app))
 }

@@ -3,45 +3,12 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"net/url"
-	"strconv"
 	"strings"
+
+	"sumi/internal/apiclient"
 
 	"github.com/spf13/cobra"
 )
-
-type billRecord struct {
-	ID          int64  `json:"id"`
-	Type        int16  `json:"type"`
-	Amount      string `json:"amount"`
-	Currency    string `json:"currency"`
-	CategoryID  int64  `json:"category_id"`
-	Description string `json:"description"`
-	OccurredAt  string `json:"occurred_at"`
-}
-
-// billPayload mirrors the API's transaction body. Currency is omitted when empty
-// so the server can fall back to the user's default currency.
-type billPayload struct {
-	Type         int16  `json:"type"`
-	Amount       string `json:"amount"`
-	Currency     string `json:"currency,omitempty"`
-	CategoryID   int64  `json:"category_id,omitempty"`
-	CategoryName string `json:"category_name,omitempty"`
-	Description  string `json:"description,omitempty"`
-	OccurredAt   string `json:"occurred_at,omitempty"`
-}
-
-// batchItem is the CLI-facing shape for `bill add-batch`. Field names match the
-// flags of `bill add` so one mental model covers both.
-type batchItem struct {
-	Amount   string `json:"amount"`
-	Category string `json:"category"`
-	Type     string `json:"type"`
-	Note     string `json:"note"`
-	Date     string `json:"date"`
-	Currency string `json:"currency"`
-}
 
 var billCmd = groupCommand("bill", "Query and record transactions")
 
@@ -54,32 +21,27 @@ var billAddCmd = &cobra.Command{
 			return err
 		}
 
-		amount, _ := cmd.Flags().GetString("amount")
-		category, _ := cmd.Flags().GetString("category")
-		rawType, _ := cmd.Flags().GetString("type")
-		date, _ := cmd.Flags().GetString("date")
-		note, _ := cmd.Flags().GetString("note")
-		currency, _ := cmd.Flags().GetString("currency")
+		flags := cmd.Flags()
+		var in apiclient.BillInput
+		in.Amount, _ = flags.GetString("amount")
+		in.Category, _ = flags.GetString("category")
+		in.Type, _ = flags.GetString("type")
+		in.Date, _ = flags.GetString("date")
+		in.Note, _ = flags.GetString("note")
+		in.Currency, _ = flags.GetString("currency")
 
-		if strings.TrimSpace(amount) == "" {
+		if strings.TrimSpace(in.Amount) == "" {
 			return fmt.Errorf("--amount is required")
 		}
-		if strings.TrimSpace(category) == "" {
+		if strings.TrimSpace(in.Category) == "" {
 			return fmt.Errorf("--category is required (a second-level category name, e.g. 吃)")
 		}
-		billType, err := parseBillType(rawType)
-		if err != nil {
-			return err
+		if strings.TrimSpace(in.Type) == "" {
+			// An explicitly empty --type is a mistake, not a request for the default.
+			return fmt.Errorf("invalid --type %q: use expense or income", in.Type)
 		}
 
-		raw, err := client.do("POST", "/api/transactions/", nil, billPayload{
-			Type:         billType,
-			Amount:       strings.TrimSpace(amount),
-			Currency:     strings.TrimSpace(currency),
-			CategoryName: strings.TrimSpace(category),
-			Description:  note,
-			OccurredAt:   strings.TrimSpace(date),
-		})
+		raw, err := client.AddBill(cmd.Context(), in)
 		if err != nil {
 			return err
 		}
@@ -101,41 +63,12 @@ var billAddBatchCmd = &cobra.Command{
 			return fmt.Errorf("--items is required: a JSON array of {amount, category, type?, note?, date?, currency?}")
 		}
 
-		var items []batchItem
+		var items []apiclient.BillInput
 		if err := json.Unmarshal([]byte(rawItems), &items); err != nil {
 			return fmt.Errorf("--items is not a valid JSON array: %w", err)
 		}
-		if len(items) == 0 {
-			return fmt.Errorf("--items must contain at least one transaction")
-		}
 
-		payloads := make([]billPayload, 0, len(items))
-		for i, item := range items {
-			if strings.TrimSpace(item.Amount) == "" {
-				return fmt.Errorf("items[%d]: amount is required", i)
-			}
-			if strings.TrimSpace(item.Category) == "" {
-				return fmt.Errorf("items[%d]: category is required", i)
-			}
-			itemType := item.Type
-			if strings.TrimSpace(itemType) == "" {
-				itemType = "expense"
-			}
-			billType, err := parseBillType(itemType)
-			if err != nil {
-				return fmt.Errorf("items[%d]: %w", i, err)
-			}
-			payloads = append(payloads, billPayload{
-				Type:         billType,
-				Amount:       strings.TrimSpace(item.Amount),
-				Currency:     strings.TrimSpace(item.Currency),
-				CategoryName: strings.TrimSpace(item.Category),
-				Description:  item.Note,
-				OccurredAt:   strings.TrimSpace(item.Date),
-			})
-		}
-
-		raw, err := client.do("POST", "/api/transactions/batch", nil, map[string]any{"items": payloads})
+		raw, err := client.AddBills(cmd.Context(), items)
 		if err != nil {
 			return err
 		}
@@ -152,43 +85,18 @@ var billListCmd = &cobra.Command{
 			return err
 		}
 
-		query := url.Values{}
+		flags := cmd.Flags()
+		var filter apiclient.BillFilter
+		filter.Type, _ = flags.GetString("type")
+		filter.Category, _ = flags.GetString("category")
+		filter.Keyword, _ = flags.GetString("keyword")
+		filter.Currency, _ = flags.GetString("currency")
+		filter.From, _ = flags.GetString("from")
+		filter.To, _ = flags.GetString("to")
+		filter.Limit, _ = flags.GetInt("limit")
+		filter.Offset, _ = flags.GetInt("offset")
 
-		rawType, _ := cmd.Flags().GetString("type")
-		var billType int16
-		if strings.TrimSpace(rawType) != "" {
-			billType, err = parseBillType(rawType)
-			if err != nil {
-				return err
-			}
-			query.Set("type", strconv.Itoa(int(billType)))
-		}
-
-		if category, _ := cmd.Flags().GetString("category"); strings.TrimSpace(category) != "" {
-			categoryID, err := resolveCategoryIDByName(client, strings.TrimSpace(category), billType)
-			if err != nil {
-				return err
-			}
-			query.Set("category_id", strconv.FormatInt(categoryID, 10))
-		}
-		if keyword, _ := cmd.Flags().GetString("keyword"); strings.TrimSpace(keyword) != "" {
-			query.Set("keyword", strings.TrimSpace(keyword))
-		}
-		if currency, _ := cmd.Flags().GetString("currency"); strings.TrimSpace(currency) != "" {
-			query.Set("currency", strings.TrimSpace(currency))
-		}
-		if from, _ := cmd.Flags().GetString("from"); strings.TrimSpace(from) != "" {
-			query.Set("start_time", strings.TrimSpace(from))
-		}
-		if to, _ := cmd.Flags().GetString("to"); strings.TrimSpace(to) != "" {
-			query.Set("end_time", strings.TrimSpace(to))
-		}
-		limit, _ := cmd.Flags().GetInt("limit")
-		query.Set("limit", strconv.Itoa(limit))
-		offset, _ := cmd.Flags().GetInt("offset")
-		query.Set("offset", strconv.Itoa(offset))
-
-		raw, err := client.do("GET", "/api/transactions/", query, nil)
+		raw, err := client.ListBills(cmd.Context(), filter)
 		if err != nil {
 			return err
 		}
@@ -201,11 +109,15 @@ var billGetCmd = &cobra.Command{
 	Short: "Show one transaction",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := apiclient.ParseBillID(args[0])
+		if err != nil {
+			return err
+		}
 		client, err := newAPIClient()
 		if err != nil {
 			return err
 		}
-		raw, err := client.do("GET", "/api/transactions/"+url.PathEscape(args[0]), nil, nil)
+		raw, err := client.GetBill(cmd.Context(), id)
 		if err != nil {
 			return err
 		}
@@ -213,69 +125,36 @@ var billGetCmd = &cobra.Command{
 	},
 }
 
-// billUpdateCmd reads the current row first and resends every field, because the
-// API's PUT replaces the whole transaction: sending only the changed flag would
-// blank out description, currency and date.
 var billUpdateCmd = &cobra.Command{
 	Use:   "update <id>",
 	Short: "Change fields of one transaction, leaving unspecified fields intact",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := apiclient.ParseBillID(args[0])
+		if err != nil {
+			return err
+		}
 		client, err := newAPIClient()
 		if err != nil {
 			return err
 		}
 
-		existingRaw, err := client.do("GET", "/api/transactions/"+url.PathEscape(args[0]), nil, nil)
-		if err != nil {
-			return err
-		}
-		var existing billRecord
-		if err := json.Unmarshal(existingRaw, &existing); err != nil {
-			return fmt.Errorf("cannot parse existing transaction: %w", err)
-		}
-
-		payload := billPayload{
-			Type:        existing.Type,
-			Amount:      existing.Amount,
-			Currency:    existing.Currency,
-			CategoryID:  existing.CategoryID,
-			Description: existing.Description,
-			OccurredAt:  existing.OccurredAt,
-		}
-
 		flags := cmd.Flags()
-		if flags.Changed("type") {
-			rawType, _ := flags.GetString("type")
-			billType, err := parseBillType(rawType)
-			if err != nil {
-				return err
+		changed := func(name string) *string {
+			if !flags.Changed(name) {
+				return nil
 			}
-			payload.Type = billType
+			value, _ := flags.GetString(name)
+			return &value
 		}
-		if flags.Changed("amount") {
-			amount, _ := flags.GetString("amount")
-			payload.Amount = strings.TrimSpace(amount)
-		}
-		if flags.Changed("currency") {
-			currency, _ := flags.GetString("currency")
-			payload.Currency = strings.TrimSpace(currency)
-		}
-		if flags.Changed("category") {
-			category, _ := flags.GetString("category")
-			payload.CategoryID = 0
-			payload.CategoryName = strings.TrimSpace(category)
-		}
-		if flags.Changed("note") {
-			note, _ := flags.GetString("note")
-			payload.Description = note
-		}
-		if flags.Changed("date") {
-			date, _ := flags.GetString("date")
-			payload.OccurredAt = strings.TrimSpace(date)
-		}
-
-		raw, err := client.do("PUT", "/api/transactions/"+url.PathEscape(args[0]), nil, payload)
+		raw, err := client.UpdateBill(cmd.Context(), id, apiclient.BillPatch{
+			Amount:   changed("amount"),
+			Category: changed("category"),
+			Type:     changed("type"),
+			Note:     changed("note"),
+			Date:     changed("date"),
+			Currency: changed("currency"),
+		})
 		if err != nil {
 			return err
 		}
@@ -288,19 +167,19 @@ var billDeleteCmd = &cobra.Command{
 	Short: "Delete one transaction",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		id, err := apiclient.ParseBillID(args[0])
+		if err != nil {
+			return err
+		}
 		client, err := newAPIClient()
 		if err != nil {
 			return err
 		}
-
-		id, err := strconv.ParseInt(args[0], 10, 64)
+		result, err := client.DeleteBill(cmd.Context(), id)
 		if err != nil {
-			return fmt.Errorf("invalid transaction id %q", args[0])
-		}
-		if _, err := client.do("DELETE", "/api/transactions/"+strconv.FormatInt(id, 10), nil, nil); err != nil {
 			return err
 		}
-		return emitValue(map[string]any{"deleted": true, "id": id})
+		return emitValue(result)
 	},
 }
 

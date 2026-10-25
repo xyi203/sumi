@@ -105,6 +105,25 @@ var rules = []rule{
 			"apart from cmd/api.go starting the server via internal/apps",
 	},
 	{
+		layer: "internal/apiclient",
+		deny: []string{
+			modulePath + "/internal/services",
+			modulePath + "/internal/repository",
+			modulePath + "/internal/database",
+			modulePath + "/internal/cache",
+			modulePath + "/internal/domain",
+			modulePath + "/internal/handlers",
+			modulePath + "/internal/apps",
+			modulePath + "/middleware",
+			modulePath + "/config",
+			"github.com/gofiber/fiber",
+			"github.com/jackc/pgx",
+			"github.com/redis/go-redis",
+		},
+		why: "the API client (and the MCP tools built on it) reaches the server only through HTTP, " +
+			"so auth and scope checks stay in the API's middleware; it is linked into the CLI too",
+	},
+	{
 		layer: "middleware",
 		deny:  []string{modulePath + "/internal/handlers", modulePath + "/internal/repository"},
 		why:   "middleware is used by handlers, so depending on them would be a cycle",

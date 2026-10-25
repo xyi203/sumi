@@ -261,7 +261,7 @@ var authStatusCmd = &cobra.Command{
 			client, clientErr := newAPIClient()
 			if clientErr != nil {
 				status["api_key_valid"] = false
-			} else if _, callErr := client.do("GET", "/api/categories/", url.Values{"type": []string{"1"}}, nil); callErr != nil {
+			} else if _, callErr := client.ListCategories(cmd.Context(), "expense"); callErr != nil {
 				status["api_key_valid"] = false
 				status["api_key_error"] = callErr.Error()
 			} else {

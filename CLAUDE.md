@@ -62,6 +62,7 @@ infrastructure at all; everything else may depend on it.
 | Mapping | `internal/services/mapping.go` | sqlc row → domain type; the only place that knows both shapes |
 | Services | `internal/services/` | Orchestration: reads/writes + cache + transactions; aggregated in `service.go` |
 | Handlers | `internal/handlers/` | Fiber context parsing; aggregated in `handler.go` |
+| API client | `internal/apiclient/` | HTTP client of the API and the MCP tools on it; shared by the CLI and `/mcp` |
 | Middleware | `middleware/` | JWT auth, error formatting, context helpers |
 | Utilities | `pkg/` | `logx/` (zerolog wrapper), `errorx/` (typed errors), `utils/` (JWT gen/parse) |
 
@@ -160,6 +161,9 @@ GET  /api/stats/monthly           scope stats:read
 GET  /api/stats/daily             scope stats:read
 GET  /api/stats/category          scope stats:read
 GET  /api/stats/home              scope stats:read (alias of monthly)
+
+POST /mcp                         MCP (Streamable HTTP); any valid JWT or API key,
+                                  each tool call needs its route's scope
 ```
 
 Scoped routes accept either a JWT `Authorization: Bearer` header or an
@@ -197,6 +201,44 @@ sumi bill import --file bill.csv --map date=交易时间,amount=金额 --dry-run
 sumi category list | sumi category add --name 宠物 --parent 非必要
 sumi stats monthly | daily | category
 ```
+
+### MCP server
+
+The bill tools are served over MCP two ways, by the **same code**
+(`internal/apiclient/mcp.go`, official `modelcontextprotocol/go-sdk`):
+
+| Transport | Entry point | Credential | `import_csv` |
+|-----------|-------------|------------|--------------|
+| stdio | `sumi mcp` (`cmd/mcp.go`) | env > config file, like every CLI command | yes |
+| Streamable HTTP | `/mcp` on the server (`internal/apps/mcp.go`) | the caller's `X-API-Key` or `Authorization: Bearer` | no |
+
+```bash
+claude mcp add sumi -- sumi mcp
+claude mcp add --transport http sumi https://sumi.example.com/mcp --header "X-API-Key: sk_..."
+```
+
+- **The MCP tools are an API client in both cases.** `internal/apiclient` holds every
+  client operation (`AddBill`, `AddBills`, `ListBills`, `GetBill`, `UpdateBill`,
+  `DeleteBill`, `ListCategories`, `AddCategory`, `GetStats`, `ImportCSV`); the CLI's
+  cobra `RunE`s only parse flags and print. `/mcp` points that client at the Fiber app
+  **in-process** (`inProcessTransport`, no socket) with the caller's credential, so a
+  tool call passes the same route, auth middleware and scope check as a direct API
+  call — there is no second authorization path to keep in sync. `arch_test.go`
+  keeps `internal/apiclient` off services, middleware and fiber to hold that line.
+- `/mcp` needs a valid credential to connect but no particular scope; each tool call
+  then needs the scope of the route it reaches (a read-only key gets a 403 tool
+  error from `add_bill`). It runs stateless with JSON responses, which is what lets
+  it sit behind Fiber's fasthttp adaptor. Localhost (DNS-rebinding) protection is
+  off on purpose: the credential already defeats rebinding, and the check would
+  reject every request from a reverse proxy on the same host.
+- `import_csv` only exists over stdio: its `file` is a path on the machine running
+  the MCP server, which for `/mcp` would be the server's own disk.
+- The client is resolved **per tool call**: over stdio a key stored after startup is
+  picked up and a missing key is a tool error rather than a dead server.
+- stdout is the protocol from the moment `sumi mcp` starts; never print to it there.
+- Tests: `internal/apiclient/mcp_test.go` drives the tools through the protocol
+  against an `httptest` fake API (no docker); `internal/apps/mcp_test.go` runs a real
+  MCP client against `/mcp` on a listening server with PostgreSQL and Redis.
 
 ### CSV import
 
