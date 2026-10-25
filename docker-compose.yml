@@ -1,6 +1,6 @@
 services:
   sumi:
-    image: ghcr.io/solren7/sumi:latest
+    image: ghcr.io/xyi203/sumi:latest
     # 本地构建改用: build: .
     container_name: sumi
     restart: always
